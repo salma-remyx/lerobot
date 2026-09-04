@@ -1,6 +1,6 @@
 name: Outrider
 
-# Daily cron that uses remyxai/outrider to pick a paper from
+# Dispatch-only (two-tier: the drafter owns the daily cadence); uses remyxai/outrider to pick a paper from
 # engine.remyx.ai for this research interest and open a draft PR with an
 # agent-scaffolded integration.
 #
@@ -10,14 +10,11 @@ name: Outrider
 #   ZAI_API_KEY       — Z.ai backend key (when provider=zai)
 #   MOONSHOT_API_KEY  — Moonshot AI backend key (when provider=moonshot)
 #
-# Baked defaults (this repo's agent config): provider=anthropic
-# model=(provider default) — a workflow_dispatch can override
+# Baked defaults (this repo's agent config): provider=zai
+# model=glm-5.3 — a workflow_dispatch can override
 # both per run (that's how a two-tier refiner dispatches its promotions).
 
 on:
-  schedule:
-    # Daily at 14:00 UTC
-    - cron: '0 14 * * *'
   workflow_dispatch:
     inputs:
       pin-arxiv:
@@ -102,8 +99,8 @@ jobs:
           PROVIDER_INPUT: ${{ inputs.provider }}
           MODEL_INPUT: ${{ inputs.model }}
         run: |
-          PROVIDER="${PROVIDER_INPUT:-anthropic}"
-          MODEL="${MODEL_INPUT:-}"
+          PROVIDER="${PROVIDER_INPUT:-zai}"
+          MODEL="${MODEL_INPUT:-glm-5.3}"
           case "$PROVIDER" in
             zai)
               echo "ANTHROPIC_AUTH_TOKEN=$ZAI_API_KEY_SECRET" >> "$GITHUB_ENV"
