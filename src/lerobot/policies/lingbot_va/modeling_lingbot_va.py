@@ -43,6 +43,7 @@ from lerobot.utils.constants import ACTION
 from lerobot.utils.import_utils import require_package
 
 from .configuration_lingbot_va import LingBotVAConfig
+from .geometric_dynamics import apply_geometric_weighting
 from .utils import (
     FlowMatchScheduler,
     WanTransformer3DModel,
@@ -275,6 +276,11 @@ class LingBotVAPolicy(PreTrainedPolicy):
         aw = self._train_sched_action.training_weight(ad["timesteps"].flatten()).reshape(bn, fn)
 
         latent_loss = F.mse_loss(latent_pred.float(), ld["targets"].float().detach(), reduction="none")
+        # Geometric cues for the predictive-dynamics proxy task (LingBot-VLA 2.0): up-weight the
+        # future-prediction error in geometrically-salient regions. No-op when the config weight is 0.
+        latent_loss = apply_geometric_weighting(
+            latent_loss, ld["targets"], self.config.geometric_dynamics_weight
+        )
         latent_loss = (
             (latent_loss * lw[:, None, :, None, None]).permute(0, 2, 3, 4, 1).flatten(0, 1).flatten(1)
         )

@@ -95,6 +95,12 @@ class LingBotVAConfig(PreTrainedConfig):
     # Opt-in: VAE-decode predicted video latents to ``self.last_predicted_frames`` for saving MP4s.
     save_predicted_video: bool = False
 
+    # Opt-in geometric cues for the predictive-dynamics (future-latent) proxy task, adapted from
+    # LingBot-VLA 2.0 (arXiv:2607.06403). When > 0, the future-prediction loss is reweighted by a
+    # parameter-free spatial-saliency map of the target latents (a depth-discontinuity proxy), so
+    # geometrically-informative regions receive more supervision. 0.0 keeps the original loss.
+    geometric_dynamics_weight: float = 0.0
+
     # Normalization: IDENTITY here; images are scaled + VAE-encoded and actions are
     # quantile-(un)normalized inside the policy / dedicated processor steps.
     normalization_mapping: dict[str, NormalizationMode] = field(
@@ -117,6 +123,10 @@ class LingBotVAConfig(PreTrainedConfig):
         super().__post_init__()
         if self.attn_mode not in ("torch", "flashattn", "flex"):
             raise ValueError(f"attn_mode must be one of 'torch', 'flashattn', 'flex'; got {self.attn_mode!r}")
+        if self.geometric_dynamics_weight < 0.0:
+            raise ValueError(
+                f"geometric_dynamics_weight must be >= 0.0 (0.0 disables it); got {self.geometric_dynamics_weight!r}"
+            )
 
     @property
     def chunk_size(self) -> int:
