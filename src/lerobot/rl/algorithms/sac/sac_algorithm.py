@@ -41,6 +41,7 @@ from lerobot.utils.transition import move_state_dict_to_device
 
 from ..base import RLAlgorithm
 from ..configs import TrainingStats
+from ..value_guided_selection import q_weighted_action
 from .configuration_sac import SACAlgorithmConfig
 
 
@@ -267,6 +268,52 @@ class SACAlgorithm(RLAlgorithm):
         self._update_target_networks()
         self._optimization_step += 1
         return stats
+
+    @torch.no_grad()
+    def select_action_q_weighted(
+        self,
+        observations: dict[str, Tensor],
+        num_action_samples: int = 8,
+        beta: float = 1.0,
+    ) -> Tensor:
+        """Value-guided action selection over BC draws (Q-Planning inference).
+
+        Draw ``num_action_samples`` candidate actions from the actor, score each
+        with the (conservative, min-over-ensemble) critic, and collapse them into
+        a single action with :func:`q_weighted_action`. The actor / BC weights are
+        only queried, never updated: this is the test-time half of Q-Planning,
+        where a small off-policy Q-function re-ranks a frozen policy's own
+        proposals. See https://arxiv.org/abs/2608.21204.
+
+        Args:
+            observations: Batched observation dict, e.g. ``{OBS_STATE: (batch, dim)}``.
+            num_action_samples: Number of BC draws to score per observation.
+            beta: Softmax temperature. ``beta <= 0`` recovers greedy Best-of-N;
+                large ``beta`` recovers the plain BC sample mean.
+
+        Returns:
+            The selected action, shape ``(batch, action_dim)``.
+        """
+        observation_features, _ = self.get_observation_features(observations, observations)
+
+        candidates: list[Tensor] = []
+        q_values: list[Tensor] = []
+        for _ in range(num_action_samples):
+            actions, _, _ = self.policy.actor(observations, observation_features)
+            q = self._critic_forward(
+                observations=observations,
+                actions=actions,
+                use_target=False,
+                observation_features=observation_features,
+            )
+            candidates.append(actions)
+            q_values.append(q.min(dim=0)[0])  # conservative Q per candidate, shape (batch,)
+
+        return q_weighted_action(
+            torch.stack(candidates, dim=0),  # (num_samples, batch, action_dim)
+            torch.stack(q_values, dim=0),  # (num_samples, batch)
+            beta=beta,
+        )
 
     def _compute_loss_critic(self, batch: dict[str, Any]) -> Tensor:
         # Extract common components from batch
