@@ -83,6 +83,14 @@ class SACAlgorithmConfig(RLAlgorithmConfig):
     # Gradient clipping norm for the SAC algorithm
     grad_clip_norm: float = 40.0
 
+    # Q-weighted action selection (Q-Planning inference)
+    # Number of behaviour-cloning draws to score per observation in
+    # :meth:`~lerobot.rl.algorithms.sac.SACAlgorithm.select_action_q_weighted`.
+    num_action_samples: int = 8
+    # Softmax temperature over the candidate dimension. ``beta <= 0`` recovers
+    # greedy Best-of-N; large ``beta`` recovers the plain BC sample mean.
+    beta: float = 1.0
+
     # Optimizations
     # torch.compile is currently disabled by default
     use_torch_compile: bool = False

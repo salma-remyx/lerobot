@@ -496,3 +496,37 @@ finally:
 ```
 
 See `examples/so100_to_so100_EE/rollout.py` and `examples/phone_to_so100/rollout.py` for full examples with kinematics processors.
+
+---
+
+## Value-guided action selection (Q-Planning)
+
+When a policy is trained with SAC, the learned critic can re-rank the actor's own
+proposals at inference time — the test-time half of Q-Planning ("Beyond Imitation:
+Self-Improving Robot Policies via Off-Policy Q-Planning",
+[arXiv:2608.21204](https://arxiv.org/abs/2608.21204)). `SACAlgorithm` exposes this
+as `select_action_q_weighted`: it draws several candidate actions from the (frozen)
+actor, scores each with the conservative min-over-ensemble critic, and collapses the
+draws into a single action via a Q-weighted average. The behaviour-cloning weights are
+only queried, never updated.
+
+The temperature `beta` interpolates between two familiar limits:
+
+- `beta <= 0` sharpens onto the single highest-Q draw — greedy **Best-of-N** selection.
+- large `beta` flattens the weights toward uniform — the plain (unweighted) BC sample mean.
+
+The number of draws (`num_action_samples`) and the temperature (`beta`) are typed fields
+on `SACAlgorithmConfig`, defaulting to `num_action_samples=8` and `beta=1.0`. Set them on
+the config to change the default behaviour, or pass overrides per call:
+
+```python
+# Uses the config defaults (num_action_samples=8, beta=1.0)
+action = algorithm.select_action_q_weighted(observations)
+
+# Or override per call, e.g. greedy Best-of-N over 16 draws
+action = algorithm.select_action_q_weighted(observations, num_action_samples=16, beta=0.0)
+```
+
+The pure collapsing rule is also available on its own as
+`lerobot.rl.algorithms.value_guided_selection.q_weighted_action` when you already hold a
+tensor of candidates and their Q-values.
