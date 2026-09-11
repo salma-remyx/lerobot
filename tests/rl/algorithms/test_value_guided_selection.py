@@ -70,21 +70,41 @@ def test_q_weighted_average_is_convex_combination():
     assert torch.allclose(out, torch.tensor([[1.0, 1.0]]))
 
 
-def test_low_beta_recovers_best_of_n():
-    """beta <= 0 (and the beta -> 0 limit) selects the single highest-Q draw."""
-    candidates = torch.tensor([[[0.0]], [[9.0]], [[3.0]]])  # (3, 1, 1)
-    q_values = torch.tensor([[0.1], [5.0], [1.0]])  # candidate 1 dominates
-    hard = q_weighted_action(candidates, q_values, beta=0.0)
-    soft = q_weighted_action(candidates, q_values, beta=1e-4)
-    assert torch.allclose(hard, torch.tensor([[9.0]]))
-    assert torch.allclose(soft, torch.tensor([[9.0]]), atol=1e-3)
-
-
-def test_large_beta_approaches_unweighted_mean():
-    candidates = torch.tensor([[[0.0]], [[6.0]]])  # (2, 1, 1)
-    q_values = torch.tensor([[10.0], [0.0]])
-    out = q_weighted_action(candidates, q_values, beta=1e6)
-    assert torch.allclose(out, torch.tensor([[3.0]]), atol=1e-3)
+@pytest.mark.parametrize(
+    "limit, candidates, q_values, beta, expected, atol",
+    [
+        # beta -> 0 (and beta <= 0) sharpens onto the highest-Q draw: greedy Best-of-N.
+        (
+            "best_of_n_hard",
+            torch.tensor([[[0.0]], [[9.0]], [[3.0]]]),  # (3, 1, 1)
+            torch.tensor([[0.1], [5.0], [1.0]]),  # candidate 1 dominates
+            0.0,
+            torch.tensor([[9.0]]),
+            1e-6,
+        ),
+        (
+            "best_of_n_soft",
+            torch.tensor([[[0.0]], [[9.0]], [[3.0]]]),
+            torch.tensor([[0.1], [5.0], [1.0]]),
+            1e-4,
+            torch.tensor([[9.0]]),
+            1e-3,
+        ),
+        # Large beta flattens the weights toward uniform: plain BC sample mean.
+        (
+            "unweighted_mean",
+            torch.tensor([[[0.0]], [[6.0]]]),  # (2, 1, 1)
+            torch.tensor([[10.0], [0.0]]),
+            1e6,
+            torch.tensor([[3.0]]),
+            1e-3,
+        ),
+    ],
+)
+def test_beta_limits(limit, candidates, q_values, beta, expected, atol):
+    """The temperature interpolates between greedy Best-of-N and the plain mean."""
+    out = q_weighted_action(candidates, q_values, beta=beta)
+    assert torch.allclose(out, expected, atol=atol)
 
 
 def test_shape_validation_raises():
@@ -103,6 +123,17 @@ def test_select_action_q_weighted_shape():
     algorithm = _make_algorithm(state_dim=10, action_dim=6)
     obs = {OBS_STATE: torch.randn(4, 10)}
     action = algorithm.select_action_q_weighted(obs, num_action_samples=8, beta=1.0)
+    assert action.shape == (4, 6)
+    assert torch.isfinite(action).all()
+
+
+def test_config_defaults_drive_selection():
+    """With no overrides the method reads num_action_samples/beta from the config."""
+    algorithm = _make_algorithm(state_dim=10, action_dim=6)
+    assert algorithm.config.num_action_samples == 8
+    assert algorithm.config.beta == 1.0
+    obs = {OBS_STATE: torch.randn(4, 10)}
+    action = algorithm.select_action_q_weighted(obs)
     assert action.shape == (4, 6)
     assert torch.isfinite(action).all()
 

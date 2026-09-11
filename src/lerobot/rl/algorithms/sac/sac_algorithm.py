@@ -273,8 +273,8 @@ class SACAlgorithm(RLAlgorithm):
     def select_action_q_weighted(
         self,
         observations: dict[str, Tensor],
-        num_action_samples: int = 8,
-        beta: float = 1.0,
+        num_action_samples: int | None = None,
+        beta: float | None = None,
     ) -> Tensor:
         """Value-guided action selection over BC draws (Q-Planning inference).
 
@@ -288,12 +288,19 @@ class SACAlgorithm(RLAlgorithm):
         Args:
             observations: Batched observation dict, e.g. ``{OBS_STATE: (batch, dim)}``.
             num_action_samples: Number of BC draws to score per observation.
+                Defaults to :attr:`SACAlgorithmConfig.num_action_samples` when ``None``.
             beta: Softmax temperature. ``beta <= 0`` recovers greedy Best-of-N;
-                large ``beta`` recovers the plain BC sample mean.
+                large ``beta`` recovers the plain BC sample mean. Defaults to
+                :attr:`SACAlgorithmConfig.beta` when ``None``.
 
         Returns:
             The selected action, shape ``(batch, action_dim)``.
         """
+        if num_action_samples is None:
+            num_action_samples = self.config.num_action_samples
+        if beta is None:
+            beta = self.config.beta
+
         observation_features, _ = self.get_observation_features(observations, observations)
 
         candidates: list[Tensor] = []
