@@ -35,6 +35,7 @@ from lerobot.processor import PolicyProcessorPipeline
 from ..robot_wrapper import ThreadSafeRobot
 from .base import InferenceEngine
 from .rtc import RTCInferenceEngine
+from .streaming import StreamingInferenceEngine
 from .sync import SyncInferenceEngine
 
 logger = logging.getLogger(__name__)
@@ -72,6 +73,20 @@ class RTCInferenceConfig(InferenceEngineConfig):
     # (e.g. ``--inference.rtc.execution_horizon=...``).
     rtc: RTCConfig = field(default_factory=RTCConfig)
     queue_threshold: int = 30
+
+
+@InferenceEngineConfig.register_subclass("flashvla")
+@dataclass
+class StreamingInferenceConfig(InferenceEngineConfig):
+    """Streaming decode with confidence-gated action reuse (FlashVLA-style).
+
+    Reuses buffered actions while successive chunks agree, re-decoding only when
+    the predicted trajectory drifts, to raise the achievable control frequency.
+    """
+
+    min_horizon: int = 1
+    max_horizon: int = 16
+    overlap: int = 8
 
 
 # ---------------------------------------------------------------------------
@@ -124,5 +139,19 @@ def create_inference_engine(
             compile_warmup_inferences=compile_warmup_inferences,
             rtc_queue_threshold=config.queue_threshold,
             shutdown_event=shutdown_event,
+        )
+    if isinstance(config, StreamingInferenceConfig):
+        return StreamingInferenceEngine(
+            policy=policy,
+            preprocessor=preprocessor,
+            postprocessor=postprocessor,
+            dataset_features=dataset_features,
+            ordered_action_keys=ordered_action_keys,
+            task=task,
+            device=device,
+            robot_type=robot_wrapper.robot_type,
+            min_horizon=config.min_horizon,
+            max_horizon=config.max_horizon,
+            overlap=config.overlap,
         )
     raise ValueError(f"Unknown inference engine type: {type(config).__name__}")

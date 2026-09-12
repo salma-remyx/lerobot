@@ -22,10 +22,12 @@ from .base import InferenceEngine, PolicyQuery, QueryAnswer, QueryKind
 from .factory import (
     InferenceEngineConfig,
     RTCInferenceConfig,
+    StreamingInferenceConfig,
     SyncInferenceConfig,
     create_inference_engine,
 )
 from .rtc import RTCInferenceEngine
+from .streaming import StreamingInferenceEngine, StreamingReuseGate
 from .sync import SyncInferenceEngine
 
 __all__ = [
@@ -36,6 +38,9 @@ __all__ = [
     "QueryKind",
     "RTCInferenceConfig",
     "RTCInferenceEngine",
+    "StreamingInferenceConfig",
+    "StreamingInferenceEngine",
+    "StreamingReuseGate",
     "SyncInferenceConfig",
     "SyncInferenceEngine",
     "create_inference_engine",
