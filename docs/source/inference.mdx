@@ -253,7 +253,7 @@ lerobot-rollout \
 
 ## Inference Backends
 
-Select a backend with `--inference.type=<name>`. All strategies work with both backends.
+Select a backend with `--inference.type=<name>`. All strategies work with every backend.
 
 ### Sync (default)
 
@@ -291,6 +291,34 @@ lerobot-rollout \
 | `--inference.queue_threshold`               | Backpressure threshold; trained RTC requires at least its maximum delay        |
 
 See the [Real-Time Chunking](./rtc) guide for details on tuning RTC parameters.
+
+### Streaming / FlashVLA (`--inference.type=flashvla`)
+
+Inline chunk decoding with confidence-gated action reuse (based on [FlashVLA](https://arxiv.org/abs/2608.27384)). After each decode the engine buffers the chunk and reuses its already-decoded actions while successive chunks agree, re-decoding only when the predicted trajectory drifts. This raises the achievable control frequency by spending far fewer policy calls than control ticks.
+
+Requires a chunking policy that overrides `predict_action_chunk` (e.g. Pi0, Pi0.5, SmolVLA, ACT). Use `--inference.type=sync` for non-chunking policies. Decoding runs inline on the control thread — no background thread — so it is a drop-in replacement for the sync backend when the policy is fast enough to decode within one tick's reuse budget.
+
+```bash
+lerobot-rollout \
+    --strategy.type=base \
+    --inference.type=flashvla \
+    --inference.min_horizon=1 \
+    --inference.max_horizon=16 \
+    --inference.overlap=8 \
+    --policy.path=${HF_USER}/pi0_policy \
+    --robot.type=so100_follower \
+    --robot.port=/dev/ttyACM0 \
+    --robot.cameras="{ front: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}}" \
+    --task="Pick up the cube" \
+    --duration=60 \
+    --device=cuda
+```
+
+| Flag                        | Description                                                                       |
+| --------------------------- | --------------------------------------------------------------------------------- |
+| `--inference.min_horizon`   | Minimum actions reused per decode, used when confidence is low (default: `1`)      |
+| `--inference.max_horizon`   | Maximum actions reused per decode, used when confidence is high (default: `16`)    |
+| `--inference.overlap`       | Timesteps compared between successive chunks to score agreement (default: `8`)     |
 
 ---
 
