@@ -37,6 +37,7 @@ else:
 
 from .action_head import VLAJEPAActionHead
 from .configuration_vla_jepa import VLAJEPAConfig
+from .latent_rollout import semigroup_rollout_loss
 from .qwen_interface import Qwen3VLInterface
 from .world_model import ActionConditionedVideoPredictor
 
@@ -281,8 +282,27 @@ class VLAJEPAModel(nn.Module):
         if reduction == "none":
             # Per-sample loss (B,): mean over all non-batch dims (tokens, feature).
             elementwise = F.l1_loss(predicted_states, gt_states.float(), reduction="none")
-            return elementwise.mean(dim=tuple(range(1, elementwise.ndim)))
-        return F.l1_loss(predicted_states, gt_states.float(), reduction="mean")
+            loss = elementwise.mean(dim=tuple(range(1, elementwise.ndim)))
+        else:
+            loss = F.l1_loss(predicted_states, gt_states.float(), reduction="mean")
+
+        # SG-JEPA autoregressive latent rollout: compose the one-step predictor on its own
+        # outputs and match the k-step-ahead encoder latents, training against the error
+        # accumulation the single-step term never sees (semigroup consistency). Off by default.
+        rollout_steps = min(self.config.world_model_rollout_steps, t_enc_ctx)
+        if rollout_steps > 0:
+            rollout_loss = semigroup_rollout_loss(
+                self.video_predictor,
+                input_states[:, :tokens_per_frame, :].float(),
+                gt_states.float(),
+                action_tokens[:, :expected_actions].float(),
+                tokens_per_frame=tokens_per_frame,
+                actions_per_frame=self.config.num_action_tokens_per_timestep,
+                num_steps=rollout_steps,
+                reduction=reduction,
+            )
+            loss = loss + self.config.world_model_rollout_loss_weight * rollout_loss
+        return loss
 
     def _action_loss(
         self,

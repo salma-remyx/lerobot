@@ -97,6 +97,12 @@ class VLAJEPAConfig(PreTrainedConfig):
     predictor_mlp_ratio: float = 4.0
     predictor_dropout: float = 0.0
     world_model_loss_weight: float = 0.1
+    # SG-JEPA autoregressive latent rollout (semigroup consistency). 0 disables it and keeps the
+    # single-step teacher-forced world-model loss. When >0, the predictor is composed this many
+    # times on its own latent outputs and matched against the k-step-ahead encoder latents, adding
+    # a multi-step rollout loss on top of the single-step term (weighted by the field below).
+    world_model_rollout_steps: int = 0
+    world_model_rollout_loss_weight: float = 1.0
     # Temporal tubelet size of the JEPA encoder (e.g. 2 for vjepa2-vitl-fpc64-256). When the
     # world model is enabled the encoder's own `config.tubelet_size` is authoritative and this
     # is only used for the `num_video_frames` sanity check below.
