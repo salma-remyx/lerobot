@@ -97,6 +97,10 @@ class VLAJEPAConfig(PreTrainedConfig):
     predictor_mlp_ratio: float = 4.0
     predictor_dropout: float = 0.0
     world_model_loss_weight: float = 0.1
+    # Hidden width of the FARM failure readout (arXiv:2609.11445) built over the frozen predictor
+    # states. Kept at 32 to hold the head near the paper's ~34k-parameter budget for typical
+    # predictor widths; raise only if you need a larger readout.
+    failure_readout_hidden_dim: int = 32
     # Temporal tubelet size of the JEPA encoder (e.g. 2 for vjepa2-vitl-fpc64-256). When the
     # world model is enabled the encoder's own `config.tubelet_size` is authoritative and this
     # is only used for the `num_video_frames` sanity check below.

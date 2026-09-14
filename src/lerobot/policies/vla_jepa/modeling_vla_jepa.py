@@ -116,7 +116,8 @@ class VLAJEPAModel(nn.Module):
             # predictor states. `predicted_states` come out at the predictor's
             # `embed_dim` (per-view hidden size times the number of views).
             self.failure_readout = FailureReadout(
-                state_dim=self.video_encoder.config.hidden_size * num_views
+                state_dim=self.video_encoder.config.hidden_size * num_views,
+                hidden_dim=config.failure_readout_hidden_dim,
             )
         else:
             self.video_encoder = None
