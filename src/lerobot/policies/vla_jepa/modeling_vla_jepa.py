@@ -37,6 +37,7 @@ else:
 
 from .action_head import VLAJEPAActionHead
 from .configuration_vla_jepa import VLAJEPAConfig
+from .failure_readout import FailureReadout
 from .qwen_interface import Qwen3VLInterface
 from .world_model import ActionConditionedVideoPredictor
 
@@ -111,10 +112,17 @@ class VLAJEPAModel(nn.Module):
                 num_action_tokens_per_step=config.num_action_tokens_per_timestep,
                 dropout=config.predictor_dropout,
             )
+            # FARM (arXiv:2609.11445) readout: decodes failure risk from the frozen
+            # predictor states. `predicted_states` come out at the predictor's
+            # `embed_dim` (per-view hidden size times the number of views).
+            self.failure_readout = FailureReadout(
+                state_dim=self.video_encoder.config.hidden_size * num_views
+            )
         else:
             self.video_encoder = None
             self.video_processor = None
             self.video_predictor = None
+            self.failure_readout = None
 
         if config.freeze_qwen:
             self.qwen.requires_grad_(False)
@@ -221,11 +229,15 @@ class VLAJEPAModel(nn.Module):
         n_tokens, hidden = embeddings.shape[1], embeddings.shape[2]
         return embeddings.reshape(b, v, n_tokens, hidden).permute(0, 2, 1, 3).reshape(b, n_tokens, v * hidden)
 
-    def _world_model_loss(self, videos: Tensor, action_tokens: Tensor, reduction: str = "mean") -> Tensor:
-        """JEPA encode + predictor L1 loss. `videos` is [B, V, T, C, H, W] float in [0, 1].
+    def _encode_world_model_states(
+        self, videos: Tensor, action_tokens: Tensor
+    ) -> tuple[Tensor, Tensor] | None:
+        """Frozen JEPA encode + action-conditioned predictor rollout.
 
-        `reduction="none"` returns a per-sample loss (B,) for sample weighting (RA-BC);
-        "mean" returns the scalar loss.
+        Returns ``(predicted_states, gt_states)``, each ``[B, N, D]``, or ``None`` when the
+        clip is too short to form a shift-by-one JEPA target. `videos` is
+        [B, V, T, C, H, W] float in [0, 1]. The encoder runs frozen (``no_grad``); the
+        predictor states are the internal signal FARM's readout decodes.
         """
         # Match the world model's expected view count: pad with the first view, or trim extras.
         num_views = self.config.num_world_model_views
@@ -253,8 +265,7 @@ class VLAJEPAModel(nn.Module):
         # num_video_frames raw frames → t_enc_total temporal positions after tubelet compression
         t_enc_total = self.config.num_video_frames // tubelet_size
         if t_enc_total < 2:
-            zero_shape = (video_embeddings.shape[0],) if reduction == "none" else ()
-            return torch.zeros(zero_shape, device=video_embeddings.device)
+            return None
 
         # Shift-by-one JEPA split: input_states = positions 0..T-2, gt_states = positions 1..T-1
         t_enc_ctx = t_enc_total - 1
@@ -278,11 +289,39 @@ class VLAJEPAModel(nn.Module):
         predicted_states = self.video_predictor(
             input_states.float(), action_tokens[:, :expected_actions].float()
         )
+        return predicted_states, gt_states
+
+    def _world_model_loss(self, videos: Tensor, action_tokens: Tensor, reduction: str = "mean") -> Tensor:
+        """JEPA encode + predictor L1 loss.
+
+        `reduction="none"` returns a per-sample loss (B,) for sample weighting (RA-BC);
+        "mean" returns the scalar loss.
+        """
+        states = self._encode_world_model_states(videos, action_tokens)
+        if states is None:
+            zero_shape = (videos.shape[0],) if reduction == "none" else ()
+            return torch.zeros(zero_shape, device=self.video_encoder.device)
+        predicted_states, gt_states = states
         if reduction == "none":
             # Per-sample loss (B,): mean over all non-batch dims (tokens, feature).
             elementwise = F.l1_loss(predicted_states, gt_states.float(), reduction="none")
             return elementwise.mean(dim=tuple(range(1, elementwise.ndim)))
         return F.l1_loss(predicted_states, gt_states.float(), reduction="mean")
+
+    @torch.no_grad()
+    def predict_failure_score(self, videos: Tensor, action_tokens: Tensor) -> Tensor:
+        """FARM readout: per-sample failure probability in ``[0, 1]`` from frozen states.
+
+        Decodes online failure risk from the world model's internal predictive states
+        without touching the frozen backbone (arXiv:2609.11445). Returns zeros for clips
+        too short to roll the predictor. Aggregate step scores across a trajectory with
+        :func:`lerobot.policies.vla_jepa.failure_readout.causal_trajectory_risk`.
+        """
+        states = self._encode_world_model_states(videos, action_tokens)
+        if states is None:
+            return torch.zeros(videos.shape[0], device=self.video_encoder.device)
+        predicted_states, gt_states = states
+        return self.failure_readout.failure_score(predicted_states, gt_states)
 
     def _action_loss(
         self,
