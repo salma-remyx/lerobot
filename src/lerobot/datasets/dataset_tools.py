@@ -172,6 +172,41 @@ def delete_episodes(
     return new_dataset
 
 
+def filter_unreliable_episodes(
+    dataset: LeRobotDataset,
+    feature_keys: list[str] | None = None,
+    n_sigma: float = 3.0,
+    max_drop_fraction: float = 0.5,
+    output_dir: str | Path | None = None,
+    repo_id: str | None = None,
+) -> LeRobotDataset:
+    """Audit supervision quality and drop unreliable episodes into a new dataset.
+
+    Adapted from RoboDrop (https://arxiv.org/abs/2609.10021): each episode is
+    scored by how far its action/state supervision diverges from the corpus, then
+    an automatic outlier rule selects the unreliable ones to remove via
+    :func:`delete_episodes`. When no episode is flagged the source dataset is
+    returned unchanged.
+
+    Args:
+        dataset: The source LeRobotDataset to curate.
+        feature_keys: Numeric vector features to audit (defaults to action/state).
+        n_sigma: Robust-z cutoff above the median for flagging an episode.
+        max_drop_fraction: Upper bound on the fraction of episodes to drop.
+        output_dir: Root directory for the curated dataset (see ``delete_episodes``).
+        repo_id: Curated dataset identifier (see ``delete_episodes``).
+    """
+    from .episode_quality import score_episode_incompatibility, select_unreliable_episodes
+
+    scores = score_episode_incompatibility(dataset, feature_keys=feature_keys)
+    to_drop = select_unreliable_episodes(scores, n_sigma=n_sigma, max_drop_fraction=max_drop_fraction)
+    if not to_drop:
+        logging.info("Episode-quality audit found no unreliable episodes; returning source dataset")
+        return dataset
+
+    return delete_episodes(dataset, to_drop, output_dir=output_dir, repo_id=repo_id)
+
+
 def split_dataset(
     dataset: LeRobotDataset,
     splits: dict[str, float | list[int]],
