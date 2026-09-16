@@ -26,6 +26,7 @@ from .episodic import EpisodicStrategy
 from .factory import create_strategy
 from .highlight import HighlightStrategy
 from .sentry import SentryStrategy
+from .speed_sweep import SpeedSweepStrategy
 
 __all__ = [
     "BaseStrategy",
@@ -36,6 +37,7 @@ __all__ = [
     "EpisodicStrategy",
     "RolloutStrategy",
     "SentryStrategy",
+    "SpeedSweepStrategy",
     "create_strategy",
     "estimate_max_episode_seconds",
     "safe_push_to_hub",
