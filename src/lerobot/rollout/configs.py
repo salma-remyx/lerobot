@@ -204,6 +204,42 @@ class EpisodicStrategyConfig(RolloutStrategyConfig):
     smooth_handover: bool = True
 
 
+@RolloutStrategyConfig.register_subclass("speed_sweep")
+@dataclass
+class SpeedSweepStrategyConfig(RolloutStrategyConfig):
+    """Temporal-robustness evaluation across scaled task-execution speeds.
+
+    Runs ``episodes_per_speed`` fixed-length rollouts at each factor in
+    ``speed_factors`` (nominal evaluated first) and scores how much success
+    degrades relative to the nominal speed.  Adapted from arXiv:2609.01453 — see
+    :mod:`lerobot.rollout.temporal_robustness`.  Pure evaluation: no dataset is
+    recorded, and success is labelled by the operator between episodes.
+    """
+
+    # Multipliers on the control cadence; a factor of 2.0 replays the demonstrated
+    # trajectory twice as fast.  The nominal factor is always evaluated as the
+    # degradation baseline, whether or not it appears here.
+    speed_factors: list[float] = field(default_factory=lambda: [1.0, 1.25, 1.5, 2.0])
+    # The demonstrated / trained cadence, used as the degradation baseline.
+    nominal_factor: float = 1.0
+    # Rollouts collected per speed factor before advancing to the next.
+    episodes_per_speed: int = 5
+    # Seconds of autonomous policy execution per rollout episode.
+    episode_time_s: float = 30.0
+
+    def __post_init__(self):
+        if not self.speed_factors:
+            raise ValueError("speed_sweep strategy requires at least one entry in --strategy.speed_factors")
+        if any(factor <= 0 for factor in self.speed_factors):
+            raise ValueError(f"speed_sweep speed_factors must all be > 0, got {self.speed_factors}")
+        if self.nominal_factor <= 0:
+            raise ValueError(f"speed_sweep nominal_factor must be > 0, got {self.nominal_factor}")
+        if self.episodes_per_speed < 1:
+            raise ValueError(f"speed_sweep episodes_per_speed must be >= 1, got {self.episodes_per_speed}")
+        if self.episode_time_s <= 0:
+            raise ValueError(f"speed_sweep episode_time_s must be > 0, got {self.episode_time_s}")
+
+
 @RolloutStrategyConfig.register_subclass("dagger")
 @dataclass
 class DAggerStrategyConfig(RolloutStrategyConfig):

@@ -36,6 +36,7 @@ from .configs import (
     RolloutConfig,
     RolloutStrategyConfig,
     SentryStrategyConfig,
+    SpeedSweepStrategyConfig,
 )
 from .context import (
     DatasetContext,
@@ -71,6 +72,7 @@ from .strategies import (
     HighlightStrategy,
     RolloutStrategy,
     SentryStrategy,
+    SpeedSweepStrategy,
     create_strategy,
 )
 
@@ -107,6 +109,8 @@ __all__ = [
     "RuntimeContext",
     "SentryStrategy",
     "SentryStrategyConfig",
+    "SpeedSweepStrategy",
+    "SpeedSweepStrategyConfig",
     "SyncInferenceConfig",
     "SyncInferenceEngine",
     "build_rollout_context",
