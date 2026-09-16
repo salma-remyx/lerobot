@@ -197,6 +197,30 @@ Teleop is optional — if omitted the robot holds its position during the reset 
 | `--strategy.smooth_leader_to_follower_handover` | Whether to turn on or off the leader -> follower smooth handover behavior.                                                                                 |
 | `--strategy.smooth_handover`                    | Smoothly hand control to the teleop at reset start (default: true). Disable for clutch-style teleops that re-reference at the current robot pose on engage |
 
+### Speed sweep (`--strategy.type=speed_sweep`)
+
+Temporal-robustness evaluation: the policy is run across a sweep of task-execution speeds and the tool reports how much success degrades relative to the nominal (demonstrated) cadence. Adapted from [arXiv:2609.01453](https://arxiv.org/abs/2609.01453) — equal success at nominal speed does not imply a policy holds up as the task is executed faster. Each speed factor multiplies the control cadence, so a factor of `2.0` replays the same trajectory twice as fast without any policy or environment change. This is pure evaluation: no dataset is recorded, and the operator labels each episode success/failure between rollouts.
+
+```bash
+lerobot-rollout \
+    --strategy.type=speed_sweep \
+    --strategy.speed_factors="[1.0, 1.25, 1.5, 2.0]" \
+    --strategy.episodes_per_speed=5 \
+    --policy.path=${HF_USER}/my_policy \
+    --robot.type=so100_follower \
+    --robot.port=/dev/ttyACM0 \
+    --task="Pick up the red cube"
+```
+
+The nominal factor is always evaluated first as the degradation baseline, whether or not it appears in `--strategy.speed_factors`. After the sweep, a per-speed table reports success rate and the drop (`Δ vs nominal`, in percentage points) at each factor, plus the headline max-speed degradation and the fraction of nominal success retained at the fastest speed.
+
+| Flag                          | Description                                                                                     |
+| ----------------------------- | ----------------------------------------------------------------------------------------------- |
+| `--strategy.speed_factors`    | Cadence multipliers to evaluate (nominal is always included as the baseline)                     |
+| `--strategy.nominal_factor`   | Demonstrated / trained cadence used as the degradation baseline (default: `1.0`)                 |
+| `--strategy.episodes_per_speed` | Rollouts collected per speed factor before advancing to the next (default: `5`)                |
+| `--strategy.episode_time_s`   | Seconds of autonomous policy execution per rollout episode (default: `30`)                        |
+
 ### Bring your own strategy
 
 `--strategy.type` accepts any strategy registered in the environment, not only the built-ins above. A strategy is two classes in a pip-installable package: a config registered on `RolloutStrategyConfig`, and a `RolloutStrategy` subclass named after it without the `Config` suffix — the same `SomethingConfig`/`Something` convention as [custom hardware](./integrate_hardware#the-4-core-conventions), resolved from the config's module or package.
