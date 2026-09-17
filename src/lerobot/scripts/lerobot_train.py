@@ -622,8 +622,10 @@ def train(cfg: TrainPipelineConfig):
         # Capacity-aware design report (MINERVA, arXiv:2609.03715): surface where this policy
         # sits relative to the empirically-measured LIBERO capacity floor and how its parameters
         # split across the vision/action components the paper flags as the dominant levers.
-        for line in format_capacity_report(policy).splitlines():
-            logging.info(line)
+        # Opt-in via --capacity_report=true (see TrainPipelineConfig.capacity_report).
+        if cfg.capacity_report:
+            for line in format_capacity_report(policy).splitlines():
+                logging.info(line)
 
     dl_iter = cycle(dataloader)
     policy.train()
