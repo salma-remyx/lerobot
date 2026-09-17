@@ -73,6 +73,7 @@ from lerobot.envs import close_envs, make_env, make_env_pre_post_processors
 from lerobot.jobs import submit_to_hf
 from lerobot.optim.factory import make_optimizer_and_scheduler
 from lerobot.policies import PreTrainedPolicy, make_policy, make_pre_post_processors
+from lerobot.policies.capacity_report import format_capacity_report
 from lerobot.policies.factory import ProcessorConfigKwargs
 from lerobot.processor.rename_processor import rename_batch_keys, rename_stats
 from lerobot.rewards import make_reward_pre_post_processors
@@ -618,6 +619,11 @@ def train(cfg: TrainPipelineConfig):
         )
         logging.info(f"{num_learnable_params=} ({format_big_number(num_learnable_params)})")
         logging.info(f"{num_total_params=} ({format_big_number(num_total_params)})")
+        # Capacity-aware design report (MINERVA, arXiv:2609.03715): surface where this policy
+        # sits relative to the empirically-measured LIBERO capacity floor and how its parameters
+        # split across the vision/action components the paper flags as the dominant levers.
+        for line in format_capacity_report(policy).splitlines():
+            logging.info(line)
 
     dl_iter = cycle(dataloader)
     policy.train()
