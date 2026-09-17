@@ -529,6 +529,27 @@ Let's explain the command:
 
 Training should take several hours. You will find checkpoints in `outputs/train/act_so101_test/checkpoints`.
 
+#### Capacity-aware policy report
+
+Pass `--capacity_report=true` to add a capacity-aware report to the training banner (printed once at startup). Adapted from MINERVA (["How Small Can a Manipulation Policy Be and Still Solve LIBERO?"](https://arxiv.org/abs/2609.03715), arXiv:2609.03715), it reads the policy's `named_parameters()` and reports where the model sits relative to the empirically-measured LIBERO capacity bands, plus how its parameters split across the vision/action components the paper flags as the dominant levers:
+
+```bash
+lerobot-train \
+  --dataset.repo_id=${HF_USER}/so101_test \
+  --policy.type=act \
+  --output_dir=outputs/train/act_so101_test \
+  --job_name=act_so101_test \
+  --policy.device=cuda \
+  --capacity_report=true
+```
+
+```
+MINERVA capacity band: efficient (0.54M learnable params -- within MINERVA's efficient regime (~0.25M-1.00M); the 0.54M reference hit 95.1% on LIBERO)
+Capacity split: vision=0.30M (56%), action=0.18M (33%), other=0.06M (11%)
+```
+
+The report is disabled by default and never trains, prunes, or distills the policy — it only makes the capacity picture explicit before you tune the backbone or action-chunk length.
+
 To resume training from a checkpoint, below is an example command to resume from `last` checkpoint of the `act_so101_test` policy:
 
 ```bash
