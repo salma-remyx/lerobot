@@ -111,6 +111,7 @@ from lerobot.utils.utils import (
     init_logging,
 )
 
+from .adaptive_sync import AdaptivePolicySyncController
 from .algorithms.base import RLAlgorithm
 from .algorithms.factory import make_algorithm
 from .buffer import ReplayBuffer
@@ -340,7 +341,14 @@ def add_actor_information_and_train(
 
     # Push initial policy weights to actors
     push_actor_policy_to_queue(parameters_queue=parameters_queue, algorithm=algorithm)
-    last_time_policy_pushed = time.time()
+    # Adaptive policy synchronization: push early when the policy diverges, bounded
+    # below/above by the configured min/max frequencies (arXiv:2507.10990).
+    sync_controller = AdaptivePolicySyncController(
+        max_interval_s=policy_parameters_push_frequency,
+        min_interval_s=cfg.policy.actor_learner_config.policy_parameters_push_min_frequency,
+        divergence_threshold=cfg.policy.actor_learner_config.policy_sync_divergence_threshold,
+    )
+    sync_controller.initialize(algorithm.get_weights(), now=time.time())
 
     log_training_info(cfg=cfg, policy=policy)
 
@@ -418,10 +426,14 @@ def add_actor_information_and_train(
         # One training step (trainer owns data_mixer iterator; algorithm owns UTD loop)
         stats = trainer.training_step()
 
-        # Push policy to actors if needed
-        if time.time() - last_time_policy_pushed > policy_parameters_push_frequency:
-            push_actor_policy_to_queue(parameters_queue=parameters_queue, algorithm=algorithm)
-            last_time_policy_pushed = time.time()
+        # Push policy to actors when the adaptive controller decides it's due
+        now = time.time()
+        if sync_controller.should_push(now=now, weights_fn=algorithm.get_weights):
+            weights = algorithm.get_weights()
+            push_actor_policy_to_queue(
+                parameters_queue=parameters_queue, algorithm=algorithm, weights=weights
+            )
+            sync_controller.record_push(weights, now=now)
 
         training_infos = stats.to_log_dict()
 
@@ -925,11 +937,14 @@ def check_nan_in_transition(
     return nan_detected
 
 
-def push_actor_policy_to_queue(parameters_queue: Queue, algorithm: RLAlgorithm) -> None:
+def push_actor_policy_to_queue(
+    parameters_queue: Queue, algorithm: RLAlgorithm, weights: dict[str, Any] | None = None
+) -> None:
     logging.debug("[LEARNER] Pushing actor policy to the queue")
 
-    # Create a dictionary to hold all the state dicts
-    state_dicts = algorithm.get_weights()
+    # Reuse pre-computed weights when the caller already fetched them (e.g. for a
+    # divergence check), otherwise pull a fresh state dict from the algorithm.
+    state_dicts = algorithm.get_weights() if weights is None else weights
     state_bytes = state_to_bytes(state_dicts)
     parameters_queue.put(state_bytes)
 

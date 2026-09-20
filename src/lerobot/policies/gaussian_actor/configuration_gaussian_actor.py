@@ -57,6 +57,12 @@ class ActorLearnerConfig:
     learner_host: str = "127.0.0.1"
     learner_port: int = 50051
     policy_parameters_push_frequency: int = 4
+    # Adaptive policy synchronization (arXiv:2507.10990): push weights early when
+    # the policy diverges by at least ``policy_sync_divergence_threshold`` (relative
+    # L2), bounded below by ``policy_parameters_push_min_frequency`` seconds and above
+    # by ``policy_parameters_push_frequency``. ``0.0`` keeps the fixed cadence.
+    policy_parameters_push_min_frequency: float = 0.0
+    policy_sync_divergence_threshold: float = 0.0
     queue_get_timeout: float = 2
 
 
