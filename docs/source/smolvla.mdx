@@ -91,6 +91,37 @@ lerobot-train --help
   </em>
 </p>
 
+## Language grounding regularizer (opt-in)
+
+SmolVLA ships with an optional training-time regularizer, **Residual Semantic Steering**, that counters "modality collapse" — the tendency of strong visual priors to overwhelm the natural language instruction so that the policy stops attending to what it was told to do. When enabled, an auxiliary term steers the policy so that at least a minimum fraction of the predicted action velocity is attributable to the language instruction.
+
+The regularizer is disabled by default and does not change the original loss unless you turn it on. It is controlled by two config knobs:
+
+- `--policy.lang_grounding_weight` (float, default `0.0`): weight of the auxiliary language-grounding term. Set `> 0.0` to enable the regularizer; `0.0` keeps the original training loss unchanged.
+- `--policy.lang_grounding_margin` (float, default `0.1`): target minimum share of the predicted action velocity that should be driven by the language instruction.
+
+Enable it by adding the flags to your training command, for example:
+
+```bash
+cd lerobot && lerobot-train \
+  --policy.path=lerobot/smolvla_base \
+  --dataset.repo_id=${HF_USER}/mydataset \
+  --batch_size=64 \
+  --steps=20000 \
+  --output_dir=outputs/train/my_smolvla \
+  --job_name=my_smolvla_training \
+  --policy.device=cuda \
+  --policy.lang_grounding_weight=0.1 \
+  --policy.lang_grounding_margin=0.1 \
+  --wandb.enable=true
+```
+
+<Tip>
+  Start with a small `lang_grounding_weight` (e.g. `0.05`–`0.1`) and tune it
+  based on your task: too large a weight can trade off overall action accuracy
+  for language sensitivity.
+</Tip>
+
 ## Evaluate the finetuned model and run it in real-time
 
 Similarly for when recording an episode, it is recommended that you are logged in to the HuggingFace Hub. You can follow the corresponding steps: [Record a dataset](./il_robots#record-a-dataset).

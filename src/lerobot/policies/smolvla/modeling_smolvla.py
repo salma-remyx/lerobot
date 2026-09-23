@@ -76,6 +76,7 @@ from ..utils import (
     populate_queues,
 )
 from .configuration_smolvla import SmolVLAConfig
+from .language_grounding import language_grounding_penalty
 from .smolvlm_with_expert import SmolVLMWithExpertModel
 
 
@@ -312,6 +313,22 @@ class SmolVLAPolicy(PreTrainedPolicy):
         losses = losses[:, :, : self.config.max_action_dim]
         loss_dict["losses_after_rm_padding"] = losses.clone().mean().item()
 
+        # Residual Semantic Steering: opt-in regularizer that keeps language influential
+        # (counters modality collapse). Returns a per-sample penalty reduced alongside the loss.
+        grounding_penalty = None
+        if self.config.lang_grounding_weight > 0.0:
+            grounding_penalty, grounding_metrics = language_grounding_penalty(
+                self.model,
+                images,
+                img_masks,
+                lang_tokens,
+                lang_masks,
+                state,
+                actions,
+                margin=self.config.lang_grounding_margin,
+            )
+            loss_dict.update(grounding_metrics)
+
         if reduction == "none":
             # Return per-sample losses (B,) by averaging over valid (time, action) entries
             if actions_is_pad is None:
@@ -319,6 +336,8 @@ class SmolVLAPolicy(PreTrainedPolicy):
             else:
                 num_valid = ((~actions_is_pad).sum(dim=1) * losses.shape[-1]).clamp_min(1)
                 per_sample_loss = losses.sum(dim=(1, 2)) / num_valid
+            if grounding_penalty is not None:
+                per_sample_loss = per_sample_loss + self.config.lang_grounding_weight * grounding_penalty
             loss_dict["loss"] = per_sample_loss.mean().item()
             return per_sample_loss, loss_dict
         else:
@@ -328,6 +347,8 @@ class SmolVLAPolicy(PreTrainedPolicy):
             else:
                 num_valid = ((~actions_is_pad).sum() * losses.shape[-1]).clamp_min(1)
                 loss = losses.sum() / num_valid
+            if grounding_penalty is not None:
+                loss = loss + self.config.lang_grounding_weight * grounding_penalty.mean()
             loss_dict["loss"] = loss.item()
             return loss, loss_dict
 
@@ -687,9 +708,23 @@ class VLAFlowMatching(nn.Module):
         return embs, pad_masks, att_masks
 
     def forward(
-        self, images, img_masks, lang_tokens, lang_masks, state, actions, noise=None, time=None
+        self,
+        images,
+        img_masks,
+        lang_tokens,
+        lang_masks,
+        state,
+        actions,
+        noise=None,
+        time=None,
+        return_velocity=False,
     ) -> Tensor:
-        """Do a full training forward pass and compute the loss (batch_size x num_steps x num_motors)"""
+        """Do a full training forward pass and compute the loss (batch_size x num_steps x num_motors).
+
+        When ``return_velocity`` is True, also return the predicted flow-matching velocity ``v_t``
+        so callers (e.g. the language-grounding regularizer) can compare velocities across different
+        conditionings without re-implementing the embedding pipeline.
+        """
         if noise is None:
             noise = self.sample_noise(actions.shape, actions.device)
 
@@ -721,6 +756,8 @@ class VLAFlowMatching(nn.Module):
         suffix_out = suffix_out.to(dtype=torch.float32)
         v_t = self.action_out_proj(suffix_out)
         losses = F.mse_loss(u_t, v_t, reduction="none")
+        if return_velocity:
+            return losses, v_t
         return losses
 
     def sample_actions(

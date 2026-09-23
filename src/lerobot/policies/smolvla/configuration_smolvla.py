@@ -106,6 +106,13 @@ class SmolVLAConfig(PreTrainedConfig):
     compile_model: bool = False  # Whether to use torch.compile for model optimization
     compile_mode: str = "max-autotune"  # Torch compile mode
 
+    # Residual Semantic Steering — training-time regularizer that counters "modality collapse"
+    # (visual priors overwhelming language). When > 0, an auxiliary term steers the policy so a
+    # minimum fraction (`lang_grounding_margin`) of the predicted action velocity is attributable
+    # to the language instruction. Set to 0.0 (default) to disable and keep the original loss.
+    lang_grounding_weight: float = 0.0
+    lang_grounding_margin: float = 0.1  # Target min share of action velocity driven by language.
+
     def __post_init__(self):
         super().__post_init__()
 
