@@ -109,6 +109,15 @@ class VLAJEPAConfig(PreTrainedConfig):
     # If True, encode the world-model context causally instead of slicing it from the leaky shared pass (#4153).
     causal_world_model_context: bool = False
 
+    # World-model feature-alignment distillation (arXiv:2609.24682). When enabled, a training-only
+    # projector teaches the policy's embodied-action tokens to agree with the frozen world model's
+    # *internal* features (no generative rollout). The projector is never used at inference, so the
+    # deployed policy is identical to the baseline; the gain comes purely from the representation.
+    # Requires `enable_world_model=True` (the frozen V-JEPA encoder supplies the target features).
+    enable_feature_alignment: bool = False
+    feature_alignment_loss_weight: float = 1.0
+    feature_alignment_hidden_dim: int = 1024
+
     resize_images_to: tuple[int, int] | None = None
     # Gripper post-processing from the starVLA LIBERO eval loop. Off by default: only correct for
     # LIBERO's action convention, and pins the gripper to a constant when its physical range is not
@@ -147,6 +156,12 @@ class VLAJEPAConfig(PreTrainedConfig):
                 "quality may degrade under domain shift.",
                 self.embodied_action_token,
             )
+        if self.enable_feature_alignment and not self.enable_world_model:
+            logger.warning(
+                "enable_feature_alignment=True requires the frozen world-model encoder "
+                "(enable_world_model=True) to supply target features; disabling feature alignment."
+            )
+            self.enable_feature_alignment = False
         if self.n_action_steps > self.chunk_size:
             raise ValueError("`n_action_steps` must be <= `chunk_size`.")
         if self.num_video_frames < 2 * self.jepa_tubelet_size:
