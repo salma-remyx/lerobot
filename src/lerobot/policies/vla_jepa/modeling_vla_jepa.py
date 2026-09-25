@@ -37,6 +37,7 @@ else:
 
 from .action_head import VLAJEPAActionHead
 from .configuration_vla_jepa import VLAJEPAConfig
+from .feature_alignment import WorldModelFeatureAligner
 from .qwen_interface import Qwen3VLInterface
 from .world_model import ActionConditionedVideoPredictor
 
@@ -111,10 +112,22 @@ class VLAJEPAModel(nn.Module):
                 num_action_tokens_per_step=config.num_action_tokens_per_timestep,
                 dropout=config.predictor_dropout,
             )
+            # Training-only projector for world-model feature-alignment distillation (arXiv:2609.24682).
+            # Never used at inference, so the deployed policy is identical to the baseline.
+            self.feature_aligner = (
+                WorldModelFeatureAligner(
+                    policy_dim=self.qwen.model.config.hidden_size,
+                    world_model_dim=self.video_encoder.config.hidden_size * num_views,
+                    hidden_dim=config.feature_alignment_hidden_dim,
+                )
+                if config.enable_feature_alignment
+                else None
+            )
         else:
             self.video_encoder = None
             self.video_processor = None
             self.video_predictor = None
+            self.feature_aligner = None
 
         if config.freeze_qwen:
             self.qwen.requires_grad_(False)
@@ -284,6 +297,37 @@ class VLAJEPAModel(nn.Module):
             return elementwise.mean(dim=tuple(range(1, elementwise.ndim)))
         return F.l1_loss(predicted_states, gt_states.float(), reduction="mean")
 
+    def _feature_alignment_loss(
+        self, videos: Tensor, embodied_action_tokens: Tensor, reduction: str = "mean"
+    ) -> Tensor:
+        """World-model feature-alignment distillation loss (arXiv:2609.24682).
+
+        Runs the frozen world model once over the frames (no generative rollout, no predictor),
+        mean-pools its internal features, and asks the training-only projector to make the policy's
+        embodied-action tokens agree with them. Grounding the tokens that condition the action head
+        flows the world model's representational prior into the deployed inference path, while the
+        projector itself stays out of it. `reduction="none"` returns a per-sample loss (B,).
+        """
+        num_views = self.config.num_world_model_views
+        if videos.shape[1] < num_views:
+            missing = num_views - videos.shape[1]
+            videos = torch.cat([videos, videos[:, :1].repeat(1, missing, 1, 1, 1, 1)], dim=1)
+        elif videos.shape[1] > num_views:
+            videos = videos[:, :num_views]
+
+        b, v, t_frames, c, h_img, w_img = videos.shape
+        flat = videos.reshape(b * v, t_frames, c, h_img, w_img)
+        video_pixels = self.video_processor(
+            videos=list(flat),
+            return_tensors="pt",
+            device=self.video_encoder.device,
+            do_rescale=False,
+        )["pixel_values_videos"]
+        with torch.no_grad():
+            embeddings = self.video_encoder.get_vision_features(pixel_values_videos=video_pixels)
+            target_features = self._merge_views(embeddings, b, v).mean(dim=1)  # [B, V*H]
+        return self.feature_aligner(embodied_action_tokens, target_features, reduction=reduction)
+
     def _action_loss(
         self,
         embodied_action_tokens: Tensor,
@@ -343,7 +387,11 @@ class VLAJEPAModel(nn.Module):
         action_loss = self._action_loss(
             embodied_action_tokens, actions, state, action_is_pad, reduction=reduction
         )
-        return {"action_loss": action_loss, "wm_loss": wm_loss * self.config.world_model_loss_weight}
+        output = {"action_loss": action_loss, "wm_loss": wm_loss * self.config.world_model_loss_weight}
+        if self.feature_aligner is not None and videos is not None:
+            align_loss = self._feature_alignment_loss(videos, embodied_action_tokens, reduction=reduction)
+            output["align_loss"] = align_loss * self.config.feature_alignment_loss_weight
+        return output
 
     # ---- Native predict_action (follows original VLA_JEPA.predict_action) ----
 
@@ -492,7 +540,11 @@ class VLAJEPAPolicy(PreTrainedPolicy):
 
         ref = next(iter(native_output.values()))
         zero = torch.zeros_like(ref)
-        total_loss = native_output.get("action_loss", zero) + native_output.get("wm_loss", zero)
+        total_loss = (
+            native_output.get("action_loss", zero)
+            + native_output.get("wm_loss", zero)
+            + native_output.get("align_loss", zero)
+        )
         logs = {k: v.detach().mean().item() for k, v in native_output.items()}
         logs["loss"] = total_loss.detach().mean().item()
         return total_loss, logs
