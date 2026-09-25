@@ -53,6 +53,23 @@ The video predictor is a ViT-style transformer (`ActionConditionedVideoPredictor
 
 It uses block-causal attention so each temporal step can attend to all previous steps. The predictor's input `embed_dim` equals `num_views × video_encoder_hidden_size` (e.g. 2 views × 1024 = 2048 for the pretrained checkpoints).
 
+### World-model feature alignment (optional)
+
+`enable_feature_alignment` adds an opt-in, training-only distillation term that teaches the policy's embodied-action tokens to agree with the frozen V-JEPA world model's *internal* features (a `WorldModelFeatureAligner` projector scored by cosine distance), rather than by rolling the world model forward. The projector is used only during training and is never part of the inference path, so the deployed policy is identical to the baseline and any gain comes purely from the representation.
+
+Because the frozen V-JEPA encoder supplies the target features, this requires `enable_world_model=True`. Setting `enable_feature_alignment=True` while the world model is disabled (including implicitly via `freeze_qwen=True`) logs a warning and turns feature alignment back off. The loss is scaled by `feature_alignment_loss_weight` and the projector's hidden width is set by `feature_alignment_hidden_dim`.
+
+```bash
+lerobot-train \
+  --policy.path=lerobot/VLA-JEPA-Pretrain \
+  --policy.enable_world_model=true \
+  --policy.enable_feature_alignment=true \
+  --policy.repo_id=your_org/your_repo \
+  --dataset.repo_id=your_org/your_dataset
+```
+
+It defaults to `False`, so existing runs and the published checkpoints are unaffected.
+
 ---
 
 ## Pretrained Checkpoints
@@ -92,6 +109,9 @@ Key parameters in `VLAJEPAConfig`:
 | `binarize_gripper_action`    | `False`       | Binarize the gripper dim to {-1, 1} after unnormalization. LIBERO-specific, see below                                                                                                                                                                      |
 | `clip_normalized_actions`    | `True`        | Clip normalized actions to [-1, 1] before unnormalizing. Only applied when `ACTION` uses `MIN_MAX`; ignored (with a warning) under `MEAN_STD`, where it would truncate at 1 sigma                                                                          |
 | `world_model_num_views`      | `None`        | Camera views the world-model predictor is built for. Baked into checkpoint shapes. `None` falls back to `jepa_tubelet_size`, which is what the published checkpoints encode                                                                                |
+| `enable_feature_alignment`   | `False`       | Add the training-only world-model feature-alignment loss (see [World-model feature alignment](#world-model-feature-alignment-optional)). Requires `enable_world_model=True`; if the world model is off it is disabled with a warning                        |
+| `feature_alignment_loss_weight` | 1.0        | Weight of the feature-alignment loss relative to the action loss                                                                                                                                                                                          |
+| `feature_alignment_hidden_dim`  | 1024       | Width of the alignment projector's hidden layer. The projector is training-only and never used at inference                                                                                                                                               |
 
 <Tip warning={true}>
 
