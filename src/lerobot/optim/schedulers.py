@@ -28,6 +28,8 @@ from lerobot.utils.constants import SCHEDULER_STATE
 from lerobot.utils.import_utils import _diffusers_available, require_package
 from lerobot.utils.io_utils import deserialize_json_into_object, write_json
 
+from .warmup_stable_decay import DECAY_TYPES, make_warmup_stable_decay_lambda
+
 if TYPE_CHECKING or _diffusers_available:
     from diffusers.optimization import get_scheduler
 else:
@@ -179,6 +181,45 @@ class CosineDecayWithWarmupSchedulerConfig(LRSchedulerConfig):
 
             return cosine_decay_schedule(current_step)
 
+        return LambdaLR(optimizer, lr_lambda, -1)
+
+
+@LRSchedulerConfig.register_subclass("warmup_stable_decay")
+@dataclass
+class WarmupStableDecaySchedulerConfig(LRSchedulerConfig):
+    """Warmup-Stable-Decay (WSD) schedule, adapted from Hägele et al. (2024).
+
+    Unlike the cosine schedulers above (which couple the decay curve to the total
+    step count), WSD holds a constant "stable" LR and only anneals over the last
+    ``num_decay_steps`` steps. The stable phase absorbs any extra steps, so the
+    same setup trains for any duration and cools down at the end without
+    re-tuning — the duration-agnostic property from the paper.
+
+    Args:
+        num_warmup_steps: Linear warmup length.
+        num_decay_steps: Length of the trailing cooldown phase.
+        decay_type: Cooldown shape, one of ``"1-sqrt"`` (paper's best), ``"linear"``,
+            or ``"cosine"``.
+        min_lr_ratio: Floor LR as a fraction of the peak LR (0 anneals to zero).
+    """
+
+    num_warmup_steps: int
+    num_decay_steps: int
+    decay_type: str = "1-sqrt"
+    min_lr_ratio: float = 0.0
+
+    def __post_init__(self):
+        if self.decay_type not in DECAY_TYPES:
+            raise ValueError(f"Unknown decay_type {self.decay_type!r}; expected one of {DECAY_TYPES}.")
+
+    def build(self, optimizer: Optimizer, num_training_steps: int) -> LambdaLR:
+        lr_lambda = make_warmup_stable_decay_lambda(
+            num_training_steps=num_training_steps,
+            num_warmup_steps=self.num_warmup_steps,
+            num_decay_steps=self.num_decay_steps,
+            decay_type=self.decay_type,
+            min_lr_ratio=self.min_lr_ratio,
+        )
         return LambdaLR(optimizer, lr_lambda, -1)
 
 

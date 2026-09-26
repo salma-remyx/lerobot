@@ -27,6 +27,7 @@ from .schedulers import (
     DiffuserSchedulerConfig as DiffuserSchedulerConfig,
     LRSchedulerConfig as LRSchedulerConfig,
     VQBeTSchedulerConfig as VQBeTSchedulerConfig,
+    WarmupStableDecaySchedulerConfig as WarmupStableDecaySchedulerConfig,
     load_scheduler_state,
     save_scheduler_state,
 )
@@ -48,6 +49,7 @@ __all__ = [
     "DiffuserSchedulerConfig",
     "LRSchedulerConfig",
     "VQBeTSchedulerConfig",
+    "WarmupStableDecaySchedulerConfig",
     # State management
     "load_optimizer_state",
     "load_scheduler_state",
