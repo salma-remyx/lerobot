@@ -1,0 +1,53 @@
+# Learning Rate Schedulers
+
+LeRobot selects a learning-rate scheduler through the training config. When a policy training preset is used the scheduler is chosen for you; otherwise set it explicitly on the CLI with `--scheduler.type=<name>` (alongside `--optimizer.type=...`). Each scheduler is a dataclass config registered under `lerobot.optim.schedulers`.
+
+## Available schedulers
+
+| `--scheduler.type`             | Behavior                                                                 |
+| ------------------------------ | ----------------------------------------------------------------------- |
+| `diffuser`                     | Wraps `diffusers.optimization.get_scheduler` (requires the `diffusion` extra). |
+| `vqbet`                        | Warmup + cosine tail used by VQ-BeT, offset by the VQ-VAE training phase. |
+| `constant_with_warmup`         | Linear warmup, then a flat learning rate.                                |
+| `cosine_annealing_with_warmup` | Linear warmup, then cosine annealing to zero over the remaining steps.   |
+| `cosine_decay_with_warmup`     | Warmup + cosine decay used to train π₀; auto-scales for short runs.      |
+| `warmup_stable_decay`          | Duration-agnostic Warmup-Stable-Decay (WSD) schedule (see below).        |
+
+## Warmup-Stable-Decay (WSD)
+
+The `warmup_stable_decay` scheduler implements the WSD schedule from [*Scaling Laws and Compute-Optimal Training Beyond Fixed Training Durations*](https://arxiv.org/abs/2405.18392) (Hägele et al., 2024).
+
+Unlike the cosine schedulers, which couple the decay curve to the total step count, WSD holds a constant "stable" learning rate and only anneals over the last `num_decay_steps` steps. The stable phase absorbs any extra steps, so the same setup can train for any duration and cool down at the end without re-tuning the schedule — the duration-agnostic property the paper relies on to fit scaling laws from a single run.
+
+The schedule has three phases:
+
+- **Warmup** — linear ramp from 0 to the peak LR over `num_warmup_steps`.
+- **Stable** — constant peak LR until the cooldown begins.
+- **Decay** — anneal from the peak LR down to `min_lr_ratio × peak` over the final `num_decay_steps`, following the chosen `decay_type`.
+
+### Options
+
+| Field              | Default    | Description                                                                 |
+| ------------------ | ---------- | --------------------------------------------------------------------------- |
+| `num_warmup_steps` | —          | Length of the linear warmup phase.                                          |
+| `num_decay_steps`  | —          | Length of the trailing cooldown phase.                                      |
+| `decay_type`       | `"1-sqrt"` | Cooldown shape: `"1-sqrt"` (paper's best), `"linear"`, or `"cosine"`.       |
+| `min_lr_ratio`     | `0.0`      | Floor LR as a fraction of the peak LR (`0` anneals to zero).                |
+
+### Example
+
+```bash
+lerobot-train \
+  --dataset.repo_id=${HF_USER}/my_dataset \
+  --policy.type=act \
+  --policy.repo_id=${HF_USER}/my_trained_policy \
+  --optimizer.type=adamw \
+  --scheduler.type=warmup_stable_decay \
+  --scheduler.num_warmup_steps=1000 \
+  --scheduler.num_decay_steps=5000 \
+  --scheduler.decay_type=1-sqrt \
+  --output_dir=outputs/train/act_wsd \
+  --job_name=act_wsd
+```
+
+Because the stable phase carries the peak LR for as long as needed, you can extend or shorten `--steps` without touching the scheduler configuration; the cooldown always runs over the final `num_decay_steps`.

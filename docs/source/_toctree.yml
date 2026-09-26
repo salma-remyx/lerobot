@@ -21,6 +21,8 @@
     title: Train RL in Simulation
   - local: multi_gpu_training
     title: Multi GPU training
+  - local: lr_schedulers
+    title: Learning Rate Schedulers
   - local: hil_data_collection
     title: Human In the Loop Data Collection
   - local: peft_training
