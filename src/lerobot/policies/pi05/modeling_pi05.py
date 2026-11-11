@@ -53,6 +53,7 @@ from lerobot.utils.constants import (
 )
 
 from ..common.flow_matching import euler_integrate, sample_noise, sample_time_beta
+from ..common.stratified_flow_matching import sample_time_beta_batch_stratified
 from ..common.vla_utils import (
     clone_past_key_values,
     create_sinusoidal_pos_embedding,
@@ -597,7 +598,12 @@ class PI05Pytorch(nn.Module):  # see openpi `PI0Pytorch`
         return sample_noise(shape, device)
 
     def sample_time(self, bsize, device):
-        return sample_time_beta(
+        # Both samplers share this signature; the stratified one draws each batch
+        # element from its own Beta quantile bin instead of i.i.d.
+        sampler = (
+            sample_time_beta_batch_stratified if self.config.time_sampling_stratified else sample_time_beta
+        )
+        return sampler(
             bsize,
             device,
             alpha=self.config.time_sampling_beta_alpha,

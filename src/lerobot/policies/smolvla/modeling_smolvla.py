@@ -64,6 +64,7 @@ from lerobot.utils.constants import ACTION, OBS_LANGUAGE_ATTENTION_MASK, OBS_LAN
 from lerobot.utils.import_utils import require_package
 
 from ..common.flow_matching import euler_integrate, sample_noise, sample_time_beta
+from ..common.stratified_flow_matching import sample_time_beta_batch_stratified
 from ..common.vla_utils import (
     create_sinusoidal_pos_embedding,
     make_att_2d_masks,
@@ -547,7 +548,12 @@ class VLAFlowMatching(nn.Module):
         return sample_noise(shape, device)
 
     def sample_time(self, bsize, device):
-        return sample_time_beta(bsize, device, alpha=1.5, beta=1.0, scale=0.999, offset=0.001)
+        # Both samplers share this signature; the stratified one draws each batch
+        # element from its own Beta quantile bin instead of i.i.d.
+        sampler = (
+            sample_time_beta_batch_stratified if self.config.time_sampling_stratified else sample_time_beta
+        )
+        return sampler(bsize, device, alpha=1.5, beta=1.0, scale=0.999, offset=0.001)
 
     def embed_prefix(
         self, images, img_masks, lang_tokens, lang_masks, state: torch.Tensor = None
