@@ -31,6 +31,7 @@ from lerobot.utils.constants import ACTION, OBS_STATE
 from lerobot.utils.import_utils import _transformers_available, require_package
 
 from ..common.flow_matching import euler_integrate, sample_noise, sample_time_beta
+from ..common.stratified_flow_matching import sample_time_beta_batch_stratified
 from ..common.vla_utils import create_sinusoidal_pos_embedding, pad_vector
 from ..pretrained import PreTrainedPolicy
 from .configuration_eo1 import EO1Config
@@ -219,7 +220,12 @@ class EO1VisionFlowMatchingModel(nn.Module):
         return sample_noise(shape, device)
 
     def sample_time(self, bsize, device):
-        return sample_time_beta(
+        # Both samplers share this signature; the stratified one draws each batch
+        # element from its own Beta quantile bin instead of i.i.d.
+        sampler = (
+            sample_time_beta_batch_stratified if self.config.time_sampling_stratified else sample_time_beta
+        )
+        return sampler(
             bsize,
             device,
             alpha=self.config.time_sampling_beta_alpha,

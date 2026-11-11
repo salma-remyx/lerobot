@@ -62,6 +62,11 @@ class SmolVLAConfig(PreTrainedConfig):
     # Decoding
     num_steps: int = 10
 
+    # Flow matching training: draw each batch element's time from its own quantile bin of
+    # the Beta(1.5, 1) time distribution (stratified sampling) instead of i.i.d. Same
+    # marginals, less gradient variance at no extra cost.
+    time_sampling_stratified: bool = False
+
     # Attention utils
     use_cache: bool = True
 

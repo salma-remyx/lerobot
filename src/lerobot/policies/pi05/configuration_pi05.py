@@ -61,6 +61,9 @@ class PI05Config(PreTrainedConfig):
     time_sampling_beta_beta: float = 1.0
     time_sampling_scale: float = 0.999
     time_sampling_offset: float = 0.001
+    # Draw each batch element's time from its own Beta quantile bin (stratified sampling)
+    # instead of i.i.d. Same marginals, less gradient variance at no extra cost.
+    time_sampling_stratified: bool = False
     min_period: float = 4e-3
     max_period: float = 4.0
 

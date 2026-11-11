@@ -323,6 +323,11 @@ class MolmoAct2Config(PreTrainedConfig):
     flow_matching_time_scale: float = 0.999
     flow_matching_beta_alpha: float = 1.0
     flow_matching_beta_beta: float = 1.5
+    # Variance-reduced flow draws (same marginals as the i.i.d. defaults): stratified
+    # times put one flow sample per Beta quantile bin of each observation, antithetic
+    # noise negates every other sample so noise-odd gradient components cancel in pairs.
+    flow_matching_stratified_times: bool = False
+    flow_matching_antithetic_noise: bool = False
     num_inference_steps: int | None = None
     mask_action_dim_padding: bool = True
     enable_inference_cuda_graph: bool = True

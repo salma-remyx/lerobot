@@ -52,6 +52,7 @@ from lerobot.utils.import_utils import (
     require_package,
 )
 
+from ..common.stratified_flow_matching import sample_noise_antithetic, sample_time_beta_stratified
 from ..rtc.modeling_rtc import RTCProcessor
 from .configuration_molmoact2 import MolmoAct2Config
 from .utils_molmoact2 import (
@@ -421,14 +422,24 @@ def _sample_beta_timesteps(
     time_scale: float,
     alpha: float,
     beta: float,
+    strata: int | None = None,
 ) -> Tensor:
     if cutoff < time_offset:
         raise ValueError(f"flow-matching cutoff must be >= time_offset, got {cutoff} < {time_offset}")
     if time_scale <= 0:
         raise ValueError(f"flow-matching time_scale must be > 0, got {time_scale}")
     upper = min(cutoff, time_offset + time_scale)
-    dist = Beta(torch.tensor(alpha, device=device), torch.tensor(beta, device=device))
-    samples = dist.sample((batch_size,))
+    if strata is not None and strata > 1:
+        # Stratified draws: the flat batch is `batch_size // strata` groups of `strata`
+        # samples, each group covering the Beta quantile bins once instead of i.i.d.
+        if batch_size % strata:
+            raise ValueError(f"batch_size {batch_size} is not a multiple of strata {strata}")
+        samples = sample_time_beta_stratified(
+            batch_size // strata, strata, device, alpha=alpha, beta=beta, scale=1.0, offset=0.0
+        ).reshape(-1)
+    else:
+        dist = Beta(torch.tensor(alpha, device=device), torch.tensor(beta, device=device))
+        samples = dist.sample((batch_size,))
     scale = upper - time_offset
     if scale == 0:
         return torch.full((batch_size,), time_offset, device=device, dtype=samples.dtype)
@@ -1191,6 +1202,7 @@ class MolmoAct2Policy(PreTrainedPolicy):
                     time_scale=self.config.flow_matching_time_scale,
                     alpha=self.config.flow_matching_beta_alpha,
                     beta=self.config.flow_matching_beta_beta,
+                    strata=num_flow_timesteps if self.config.flow_matching_stratified_times else None,
                 )
                 .to(dtype=actions.dtype)
                 .view(batch_size, num_flow_timesteps)
@@ -1208,7 +1220,14 @@ class MolmoAct2Policy(PreTrainedPolicy):
 
         expected_noise_shape = (batch_size, num_flow_timesteps, actions.shape[1], actions.shape[2])
         if noise is None:
-            noise = torch.randn(*expected_noise_shape, device=device, dtype=actions.dtype)
+            if self.config.flow_matching_antithetic_noise:
+                # Adjacent flow timesteps of one observation share a noise draw with
+                # opposite signs: same marginals, less gradient variance.
+                noise = sample_noise_antithetic(expected_noise_shape, device, sample_axis=1).to(
+                    dtype=actions.dtype
+                )
+            else:
+                noise = torch.randn(*expected_noise_shape, device=device, dtype=actions.dtype)
         else:
             noise = noise.to(device=device, dtype=actions.dtype)
             if tuple(noise.shape) != expected_noise_shape:
